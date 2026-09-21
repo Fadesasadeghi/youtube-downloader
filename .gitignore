@@ -1,0 +1,27 @@
+# Virtual environment
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Downloads
+downloads/*
+!downloads/.gitkeep
+
+# Streamlit
+.streamlit/
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
