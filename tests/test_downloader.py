@@ -1,9 +1,12 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from yt_dlp import YoutubeDL
 from yt_dlp.utils import YoutubeDLError
 
-from src.downloader import get_video_info, get_video_qualities
+from src.downloader import download_video, get_video_info, get_video_qualities
 
 
 def video(format_id, height=720, **overrides):
@@ -100,6 +103,141 @@ class VideoQualitiesTests(unittest.TestCase):
             "uploader": None, "webpage_url": None,
         })
         self.extract.assert_called_once_with("test", download=False)
+
+
+class VideoDownloadTests(unittest.TestCase):
+    def setUp(self):
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name)
+        self.filepath = self.directory / "safe [test].mkv"
+        patcher = patch("src.downloader.yt_dlp.YoutubeDL")
+        self.factory = patcher.start()
+        self.addCleanup(patcher.stop)
+        self.ydl = self.factory.return_value.__enter__.return_value
+        self.ydl.extract_info.return_value = {"id": "test", "title": "Example"}
+        self.ydl.process_ie_result.side_effect = self.finish
+
+    def finish(self, info, download):
+        self.assertTrue(download)
+        if not self.filepath.exists():
+            self.filepath.write_bytes(b"mock media")
+        recorder = self.ydl.add_post_processor.call_args.args[0]
+        recorder.run({**info, "filepath": str(self.filepath), "height": 480,
+                      "ext": self.filepath.suffix[1:]})
+        # Extraction results can retain stale pre-merge filenames.
+        return {**info, "_filename": "stale.mp4"}
+
+    def test_download_options_and_final_merged_path(self):
+        result = download_video(" test ", 720, self.directory)
+        options = self.factory.call_args.args[0]
+        self.assertEqual(options["format"], "bv[height<=720]+ba/b[height<=720]")
+        self.assertEqual(options["merge_output_format"], "mp4/mkv")
+        self.assertEqual(options["format_sort"], ["res", "vcodec:h264", "acodec:aac"])
+        self.assertEqual(options["js_runtimes"], {"node": {"path": "/usr/bin/node"}})
+        self.assertTrue(options["noplaylist"])
+        self.assertFalse(options["overwrites"])
+        self.assertTrue(options["restrictfilenames"])
+        self.assertTrue(options["windowsfilenames"])
+        self.assertIn("%(id)s", options["outtmpl"])
+        self.assertIn("max-720p", options["outtmpl"])
+        self.assertEqual(options["paths"]["home"], str(self.directory))
+        self.ydl.extract_info.assert_called_once_with("test", download=False, process=False)
+        self.assertEqual(self.ydl.add_post_processor.call_args.kwargs, {"when": "after_move"})
+        self.assertEqual(result, {"filepath": str(self.filepath), "id": "test",
+                                 "title": "Example", "height": 480,
+                                 "requested_height": 720, "ext": "mkv"})
+
+    def test_existing_completed_file_and_single_stream_mp4(self):
+        self.filepath = self.directory / "existing.mp4"
+        self.filepath.write_bytes(b"existing download")
+        result = download_video("test", 1080, self.directory)
+        self.assertEqual(result["filepath"], str(self.filepath))
+        self.assertEqual(self.filepath.read_bytes(), b"existing download")
+        self.assertIn("height<=1080", self.factory.call_args.args[0]["format"])
+
+    def test_creates_output_directory(self):
+        destination = self.directory / "new" / "nested"
+        self.filepath = destination / "video.mp4"
+        download_video("test", 720, destination)
+        self.assertTrue(destination.is_dir())
+
+    def test_invalid_inputs_do_not_extract(self):
+        for url in ("", "  ", None, 123):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                download_video(url, 720, self.directory)
+        for height in (0, -1, True, None, "720", 720.0, float("nan")):
+            with self.subTest(height=height), self.assertRaises(ValueError):
+                download_video("test", height, self.directory)
+        self.filepath.touch()
+        for directory in (None, "", "  ", 123, b"bytes", "bad\x00path", self.filepath):
+            with self.subTest(directory=directory), self.assertRaises(ValueError):
+                download_video("test", 720, directory)
+        self.factory.assert_not_called()
+
+    def test_extraction_and_download_failures(self):
+        for method in (self.ydl.extract_info, self.ydl.process_ie_result):
+            original = method.side_effect
+            for error in (YoutubeDLError("mock failure"), OSError("disk failure")):
+                method.side_effect = error
+                with self.assertRaisesRegex(RuntimeError, "Unable to download video"):
+                    download_video("test", 720, self.directory)
+            method.side_effect = original
+
+    def test_playlist_and_empty_metadata_never_download(self):
+        for info in (None, {}, {"_type": "playlist"}, {"entries": []},
+                     {"_type": "multi_video"}):
+            self.ydl.extract_info.return_value = info
+            with self.subTest(info=info), self.assertRaises(RuntimeError):
+                download_video("test", 720, self.directory)
+        self.ydl.process_ie_result.assert_not_called()
+
+    def test_missing_final_path_or_file_is_an_error(self):
+        self.ydl.process_ie_result.side_effect = None
+        with self.assertRaisesRegex(RuntimeError, "completed output file path"):
+            download_video("test", 720, self.directory)
+
+        def missing_file(info, download):
+            recorder = self.ydl.add_post_processor.call_args.args[0]
+            recorder.run({"filepath": str(self.directory / "missing.mp4")})
+
+        self.ydl.process_ie_result.side_effect = missing_file
+        with self.assertRaisesRegex(RuntimeError, "could not be found"):
+            download_video("test", 720, self.directory)
+
+    def test_directory_creation_failure(self):
+        with patch("src.downloader.Path.mkdir", side_effect=PermissionError("denied")):
+            with self.assertRaisesRegex(RuntimeError, "Unable to download video"):
+                download_video("test", 720, self.directory)
+        self.factory.assert_not_called()
+
+    def test_real_selector_with_synthetic_formats_never_exceeds_cap(self):
+        download_video("test", 720, self.directory)
+        options = self.factory.call_args.args[0]
+        audio = video("audio", None, vcodec="none", acodec="mp4a.40.2", ext="m4a")
+        cases = [
+            ([audio, video("low", 480), video("high", 1080)], "low+audio"),
+            ([video("combined", 360, acodec="mp4a.40.2"),
+              video("too-high", 1080, acodec="mp4a.40.2")], "combined"),
+            ([audio, video("unknown", None), video("too-high", 1080)], None),
+            ([video("opus", None, ext="webm", vcodec="none", acodec="opus"),
+              video("vp9", 720, ext="webm", vcodec="vp9")], "vp9+opus"),
+        ]
+        # Only evaluate yt-dlp's selector against local metadata; no extraction
+        # or network/media download occurs in this check.
+        with YoutubeDL(options) as ydl:
+            selector = ydl.build_format_selector(options["format"])
+            for formats, expected in cases:
+                with self.subTest(expected=expected):
+                    selected = list(selector({"formats": formats,
+                                              "has_merged_format": False,
+                                              "incomplete_formats": False}))
+                    self.assertEqual([f["format_id"] for f in selected],
+                                     [expected] if expected else [])
+                    for item in selected:
+                        self.assertLessEqual(item["height"], 720)
+                        if expected == "vp9+opus":
+                            self.assertEqual(item["ext"], "mkv")
 
 
 if __name__ == "__main__":

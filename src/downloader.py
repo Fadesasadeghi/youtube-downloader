@@ -1,7 +1,96 @@
 from math import isfinite
+from os import PathLike, fspath
+from pathlib import Path
 
 import yt_dlp
+from yt_dlp.postprocessor import PostProcessor
 from yt_dlp.utils import YoutubeDLError
+
+
+class _CompletedDownload(PostProcessor):
+    """Capture the actual output after merging and moving have finished."""
+
+    def __init__(self):
+        super().__init__()
+        self.info = None
+
+    def run(self, info):
+        self.info = dict(info)
+        return [], info
+
+
+def download_video(url: str, height: int, output_dir: str | PathLike) -> dict:
+    """Download one video with a strict maximum height (a positive integer).
+
+    Creates output_dir when needed. Returns filepath (an absolute string), id,
+    title, height (actual), requested_height, and ext. Existing completed files
+    are reused. yt-dlp generates filenames including video ID and quality cap.
+
+    Prefer H.264/AAC at comparable resolution and MP4 when compatible; other
+    codecs and MKV remain available without transcoding. Unknown-height formats
+    are excluded so the cap cannot be silently exceeded. Raises ValueError for
+    invalid inputs and RuntimeError for extraction, download, or filesystem
+    failures. Requires FFmpeg on PATH and Node at /usr/bin/node.
+    """
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("Please provide a non-empty video URL.")
+    if isinstance(height, bool) or not isinstance(height, int) or height <= 0:
+        raise ValueError("Requested height must be a positive integer, such as 720.")
+    try:
+        directory = fspath(output_dir)
+        if not isinstance(directory, str) or not directory.strip() or "\x00" in directory:
+            raise ValueError
+        destination = Path(directory).expanduser().resolve()
+        if destination.exists() and not destination.is_dir():
+            raise ValueError
+    except (TypeError, ValueError, OSError) as exc:
+        raise ValueError("Please provide a valid output directory path.") from exc
+
+    completed = _CompletedDownload()
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "js_runtimes": {"node": {"path": "/usr/bin/node"}},
+        "format": f"bv[height<={height}]+ba/b[height<={height}]",
+        "format_sort": ["res", "vcodec:h264", "acodec:aac"],
+        "merge_output_format": "mp4/mkv",
+        "paths": {"home": str(destination)},
+        "outtmpl": f"%(title).150B [%(id)s] [max-{height}p].%(ext)s",
+        "restrictfilenames": True,
+        "windowsfilenames": True,
+        "overwrites": False,
+    }
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+        with yt_dlp.YoutubeDL(options) as ydl:
+            ydl.add_post_processor(completed, when="after_move")
+            # Inspect without processing to reject playlist-only URLs before
+            # yt-dlp can walk their entries or download any media.
+            info = ydl.extract_info(url.strip(), download=False, process=False)
+            if not isinstance(info, dict) or not info:
+                raise RuntimeError("No video information was returned for this URL.")
+            if info.get("_type", "video") != "video" or "entries" in info:
+                raise RuntimeError("Please provide a single video URL, not a playlist.")
+            ydl.process_ie_result(info, download=True)
+
+        result = completed.info
+        if not result or not result.get("filepath"):
+            raise RuntimeError("Download did not produce a completed output file path.")
+        filepath = Path(result["filepath"]).resolve()
+        if not filepath.is_file():
+            raise RuntimeError("The completed download file could not be found.")
+    except (YoutubeDLError, OSError) as exc:
+        raise RuntimeError(f"Unable to download video: {exc}") from exc
+
+    return {
+        "filepath": str(filepath),
+        "id": result.get("id"),
+        "title": result.get("title"),
+        "height": result.get("height"),
+        "requested_height": height,
+        "ext": result.get("ext"),
+    }
 
 
 def get_video_info(url: str) -> dict:
