@@ -4,7 +4,7 @@ from urllib.parse import parse_qs, urlparse
 
 import streamlit as st
 
-from src.downloader import download_video, get_video_info, get_video_qualities
+from src.downloader import download_audio, download_video, get_video_info, get_video_qualities
 
 
 DOWNLOADS_DIR = Path(__file__).resolve().parent / "downloads"
@@ -47,6 +47,11 @@ def format_duration(seconds: int | float | None) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
+def clear_completed_download() -> None:
+    """Invalidate the browser-save result when a download selection changes."""
+    st.session_state.pop("completed_download", None)
+
+
 def main() -> None:
     st.set_page_config(page_title="YouTube Downloader", page_icon="▶️")
     st.title("YouTube Downloader")
@@ -54,11 +59,13 @@ def main() -> None:
 
     url = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=...")
     if st.session_state.get("video_url") != url.strip():
-        for key in ("video_info", "video_heights", "completed_download", "quality"):
+        for key in ("video_info", "video_heights", "completed_download", "quality",
+                    "download_type", "audio_format"):
             st.session_state.pop(key, None)
 
     if st.button("Get Video Info", type="primary"):
-        for key in ("video_info", "video_heights", "completed_download", "quality"):
+        for key in ("video_info", "video_heights", "completed_download", "quality",
+                    "download_type", "audio_format"):
             st.session_state.pop(key, None)
         try:
             video_url = validate_video_url(url)
@@ -88,28 +95,38 @@ def main() -> None:
     st.write("Uploader:", info.get("uploader") or "Unavailable")
     st.write("Duration:", format_duration(info.get("duration")))
 
-    heights = st.session_state.get("video_heights", [])
-    if not heights:
-        st.info("No video qualities are available. Try getting video information again.")
-        return
-    height = st.selectbox("Maximum video quality", heights,
-                          format_func=lambda value: f"{value}p", key="quality")
-    st.caption("The downloaded video may have a lower resolution than this maximum.")
-    completed = st.session_state.get("completed_download")
-    if completed and completed["requested_height"] != height:
-        st.session_state.pop("completed_download", None)
+    mode = st.selectbox("Download type", ["Video", "Audio"], key="download_type",
+                        on_change=clear_completed_download)
+    if mode == "Video":
+        heights = st.session_state.get("video_heights", [])
+        if not heights:
+            st.info("No video qualities are available. Try getting video information again.")
+            return
+        height = st.selectbox("Maximum video quality", heights,
+                              format_func=lambda value: f"{value}p", key="quality",
+                              on_change=clear_completed_download)
+        st.caption("The downloaded video may have a lower resolution than this maximum.")
+    else:
+        selected_format = st.selectbox("Audio format", ["MP3", "M4A"], key="audio_format",
+                                       on_change=clear_completed_download).lower()
 
-    if st.button("Download Video"):
-        st.session_state.pop("completed_download", None)
+    if st.button(f"Download {mode}"):
+        clear_completed_download()
         try:
-            with st.spinner("Downloading video and merging audio..."):
-                st.session_state.completed_download = download_video(
-                    st.session_state.video_url, height, DOWNLOADS_DIR
-                )
+            if mode == "Video":
+                with st.spinner("Downloading video and merging audio..."):
+                    st.session_state.completed_download = download_video(
+                        st.session_state.video_url, height, DOWNLOADS_DIR
+                    )
+            else:
+                with st.spinner("Downloading audio..."):
+                    st.session_state.completed_download = download_audio(
+                        st.session_state.video_url, DOWNLOADS_DIR, selected_format
+                    )
         except (ValueError, RuntimeError) as exc:
             st.error(str(exc))
         except Exception:
-            st.error("Unable to download the video. Please try again.")
+            st.error(f"Unable to download the {mode.lower()}. Please try again.")
 
     completed = st.session_state.get("completed_download")
     if completed:
@@ -117,16 +134,20 @@ def main() -> None:
         try:
             with filepath.open("rb") as file:
                 st.download_button(
-                    "Save video to your device", file, file_name=filepath.name,
-                    mime={".mp4": "video/mp4", ".mkv": "video/x-matroska"}.get(
+                    f"Save {mode.lower()} to your device", file, file_name=filepath.name,
+                    mime={".mp4": "video/mp4", ".mkv": "video/x-matroska",
+                          ".mp3": "audio/mpeg", ".m4a": "audio/mp4"}.get(
                         filepath.suffix.lower(), "application/octet-stream"
                     ),
                 )
-            st.success("Video downloaded successfully!")
+            st.success(f"{mode} downloaded successfully!")
             st.write("File:", filepath.name)
             st.write("Size:", f"{filepath.stat().st_size / (1024 * 1024):.2f} MiB")
-            st.write("Actual quality:", f"{completed['height']}p"
-                     if completed.get("height") else "Unavailable")
+            if mode == "Video":
+                st.write("Actual quality:", f"{completed['height']}p"
+                         if completed.get("height") else "Unavailable")
+            else:
+                st.write("Audio format:", completed["audio_format"].upper())
         except OSError:
             st.session_state.pop("completed_download", None)
             st.error("The downloaded file could not be read. Please download it again.")
