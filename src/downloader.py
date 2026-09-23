@@ -93,6 +93,90 @@ def download_video(url: str, height: int, output_dir: str | PathLike) -> dict:
     }
 
 
+def download_audio(
+    url: str, output_dir: str | PathLike, audio_format: str = "mp3"
+) -> dict:
+    """Download one audio-only file as MP3 or M4A (case-insensitive).
+
+    Creates output_dir and reuses completed outputs. Returns an absolute,
+    existing filepath plus id, title, ext, and audio_format. Requires FFmpeg
+    on PATH and Node at /usr/bin/node. M4A prefers native M4A, then AAC
+    (remuxed without re-encoding), then converts the best available audio.
+    Invalid inputs raise ValueError; download/filesystem failures raise
+    RuntimeError. Error messages omit raw extractor text, which can contain
+    credentials or signed URLs.
+    """
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("Please provide a non-empty video URL.")
+    if not isinstance(audio_format, str) or audio_format.lower() not in ("mp3", "m4a"):
+        raise ValueError("Audio format must be mp3 or m4a.")
+    audio_format = audio_format.lower()
+    try:
+        directory = fspath(output_dir)
+        if not isinstance(directory, str) or not directory.strip() or "\x00" in directory:
+            raise ValueError
+        destination = Path(directory).expanduser().resolve()
+        if destination.exists() and not destination.is_dir():
+            raise ValueError
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Please provide a valid output directory path.") from exc
+    except OSError:
+        raise RuntimeError("Unable to resolve the audio output directory.") from None
+
+    completed = _CompletedDownload()
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "js_runtimes": {"node": {"path": "/usr/bin/node"}},
+        "format": "bestaudio" if audio_format == "mp3" else
+                  "bestaudio[ext=m4a]/bestaudio[acodec^=aac]/bestaudio[acodec^=mp4a]/bestaudio",
+        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": audio_format}],
+        "final_ext": audio_format,
+        "paths": {"home": str(destination)},
+        "outtmpl": f"%(title).150B [%(id)s] [audio-{audio_format}].%(ext)s",
+        "restrictfilenames": True,
+        "windowsfilenames": True,
+        "overwrites": False,
+    }
+    stage = "create the audio output directory"
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+        stage = "initialize the audio downloader"
+        with yt_dlp.YoutubeDL(options) as ydl:
+            ydl.add_post_processor(completed, when="after_move")
+            stage = "retrieve audio information"
+            info = ydl.extract_info(url.strip(), download=False, process=False)
+            if not isinstance(info, dict) or not info:
+                raise RuntimeError("No video information was returned for this URL.")
+            if info.get("_type", "video") != "video" or "entries" in info:
+                raise RuntimeError("Please provide a single video URL, not a playlist.")
+            stage = "download or postprocess audio"
+            ydl.process_ie_result(info, download=True)
+
+        result = completed.info
+        if not result or not result.get("filepath"):
+            raise RuntimeError("Download did not produce a completed output file path.")
+        stage = "verify the completed audio file"
+        filepath = Path(result["filepath"]).resolve()
+        if not filepath.is_file():
+            raise RuntimeError("The completed download file could not be found.")
+        if filepath.suffix.lower() != f".{audio_format}":
+            raise RuntimeError("The completed audio file has an unexpected format.")
+    except (YoutubeDLError, OSError) as exc:
+        # Retain the failing operation and error class, without leaking URL
+        # tokens or credentials from yt-dlp messages or chained tracebacks.
+        raise RuntimeError(f"Unable to {stage} ({type(exc).__name__}).") from None
+
+    return {
+        "filepath": str(filepath),
+        "id": result.get("id"),
+        "title": result.get("title"),
+        "ext": audio_format,
+        "audio_format": audio_format,
+    }
+
+
 def get_video_info(url: str) -> dict:
     """Return video metadata without downloading any media.
 
