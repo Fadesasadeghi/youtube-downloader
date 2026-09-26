@@ -90,7 +90,7 @@ def main() -> None:
     if info is None:
         return
     if info.get("thumbnail"):
-        st.image(info["thumbnail"])
+        st.image(info["thumbnail"], width=550)
     st.subheader(info.get("title") or "Untitled video")
     st.write("Uploader:", info.get("uploader") or "Unavailable")
     st.write("Duration:", format_duration(info.get("duration")))
