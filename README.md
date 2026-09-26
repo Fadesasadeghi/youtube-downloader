@@ -58,10 +58,10 @@ The setup below targets Linux/WSL. Install these system tools before creating th
 
 ## Installation (Linux/WSL)
 
-Replace `<repository-url>` with the actual GitHub clone URL. The explicit destination directory keeps the following commands consistent regardless of the repository name.
+Clone the repository and set up the virtual environment:
 
 ```bash
-git clone <repository-url> youtube-downloader
+git clone https://github.com/Fadesasadeghi/youtube-downloader.git youtube-downloader
 cd youtube-downloader
 python3 -m venv .venv
 source .venv/bin/activate
