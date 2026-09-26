@@ -2,6 +2,10 @@
 
 A Streamlit-based YouTube video and audio downloader built with Python, yt-dlp, and FFmpeg. This learning and portfolio project provides a local web interface for previewing video details, choosing download options, and saving completed files through your browser.
 
+## Screenshots
+
+![YouTube Downloader interface](assets/youtube-downloader-ui.png)
+
 ## Features
 
 - Download individual YouTube videos with selectable maximum video quality based on available resolutions. The downloaded resolution may be lower than the selected maximum.
@@ -121,9 +125,6 @@ Latest local verification (2026-09-23): **47 tests passed** on Python 3.14.7.
 - YouTube and yt-dlp behavior can change over time, so extraction or downloading may require dependency or configuration updates.
 - This is a learning/portfolio project intended for local use; production readiness has not been established.
 
-## Screenshots
-
-![YouTube Downloader interface](assets/youtube-downloader-ui.png)
 
 ## Legal / Responsible Use
 
