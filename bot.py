@@ -21,10 +21,10 @@ from telegram.ext import (
 load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+PROXY_URL = os.getenv("TELEGRAM_PROXY_URL")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print(f"Chat ID: {update.effective_chat.id}")
 
     await update.message.reply_text(
         "سلام! 👋\n"
@@ -246,30 +246,30 @@ def main() -> None:
     if not TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN was not found in .env")
 
-    proxy_url = "socks5://172.23.16.1:10808"
+    builder = Application.builder().token(TOKEN)
 
-    request = HTTPXRequest(
-        proxy=proxy_url,
-        connect_timeout=30,
-        read_timeout=120,
-        write_timeout=180,
-    )
+    if PROXY_URL:
+        request = HTTPXRequest(
+            proxy=PROXY_URL,
+            connect_timeout=30,
+            read_timeout=120,
+            write_timeout=180,
+        )
 
-    get_updates_request = HTTPXRequest(
-        proxy=proxy_url,
-        connect_timeout=30,
-        read_timeout=120,
-        write_timeout=180,
-    )
+        get_updates_request = HTTPXRequest(
+            proxy=PROXY_URL,
+            connect_timeout=30,
+            read_timeout=120,
+            write_timeout=180,
+        )
 
-    app = (
-        Application.builder()
-        .token(TOKEN)
-        .request(request)
-        .get_updates_request(get_updates_request)
-        .build()
-    )
+        builder = (
+            builder
+            .request(request)
+            .get_updates_request(get_updates_request)
+        )
 
+    app = builder.build()
     app.add_handler(CommandHandler("start", start))
 
     app.add_handler(
