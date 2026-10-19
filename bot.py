@@ -1,7 +1,11 @@
 import os
 import asyncio
 from telegram.request import HTTPXRequest
-from src.downloader import download_video, get_video_qualities
+from src.downloader import (
+    download_audio,
+    download_video,
+    get_video_qualities,
+)
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -111,7 +115,23 @@ async def choose_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
 
     elif query.data == "audio":
-        await query.edit_message_text("🎵 حالت Audio انتخاب شد.")
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🎵 MP3",
+                    callback_data="audio:mp3",
+                ),
+                InlineKeyboardButton(
+                    "🎵 M4A",
+                    callback_data="audio:m4a",
+                ),
+            ]
+        ]
+
+        await query.edit_message_text(
+            "🎵 فرمت صدا رو انتخاب کن:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
 
 
 async def choose_quality(
@@ -167,6 +187,61 @@ async def choose_quality(
 
 
 
+
+async def choose_audio_format(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    query = update.callback_query
+
+    try:
+        await query.answer()
+    except Exception as exc:
+        print(
+            f"Callback answer warning: "
+            f"{type(exc).__name__}: {exc!r}"
+        )
+
+    url = context.user_data.get("youtube_url")
+
+    if not url:
+        await query.edit_message_text(
+            "❌ لینک YouTube پیدا نشد. لطفاً دوباره لینک رو بفرست."
+        )
+        return
+
+    audio_format = query.data.split(":", 1)[1]
+
+    await query.edit_message_text(
+        f"⏳ در حال دانلود فایل {audio_format.upper()}..."
+    )
+
+    try:
+        result = await asyncio.to_thread(
+            download_audio,
+            url,
+            "downloads",
+            audio_format,
+        )
+
+        filepath = result["filepath"]
+
+        with open(filepath, "rb") as audio_file:
+            await query.message.reply_audio(
+                audio=audio_file,
+                caption=f"✅ فایل {audio_format.upper()} آماده شد.",
+            )
+
+    except Exception as exc:
+        print(
+            f"Audio download/send error: "
+            f"{type(exc).__name__}: {exc!r}"
+        )
+        await query.message.reply_text(
+            "❌ دانلود یا ارسال فایل صوتی با خطا مواجه شد."
+        )
+
+
 def main() -> None:
     if not TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN was not found in .env")
@@ -199,6 +274,13 @@ def main() -> None:
 
     app.add_handler(
         CallbackQueryHandler(choose_type, pattern="^(video|audio)$")
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            choose_audio_format,
+            pattern=r"^audio:(mp3|m4a)$",
+        )
     )
 
     app.add_handler(
