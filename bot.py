@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 import asyncio
 from telegram.request import HTTPXRequest
@@ -163,6 +164,8 @@ async def choose_quality(
         f"⏳ در حال دانلود ویدیو با حداکثر کیفیت {height}p..."
     )
 
+    filepath = None
+
     try:
         result = await asyncio.to_thread(
             download_video,
@@ -183,7 +186,11 @@ async def choose_quality(
         print(f"Video download/send error: {type(exc).__name__}: {exc!r}")
         await query.message.reply_text(
             "❌ دانلود یا ارسال ویدیو با خطا مواجه شد."
-    )
+        )
+
+    finally:
+        if filepath:
+            Path(filepath).unlink(missing_ok=True)
 
 
 
@@ -216,6 +223,8 @@ async def choose_audio_format(
         f"⏳ در حال دانلود فایل {audio_format.upper()}..."
     )
 
+    filepath = None
+
     try:
         result = await asyncio.to_thread(
             download_audio,
@@ -240,6 +249,10 @@ async def choose_audio_format(
         await query.message.reply_text(
             "❌ دانلود یا ارسال فایل صوتی با خطا مواجه شد."
         )
+
+    finally:
+        if filepath:
+            Path(filepath).unlink(missing_ok=True)
 
 
 def main() -> None:
