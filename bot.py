@@ -6,6 +6,7 @@ from src.downloader import (
     download_audio,
     download_video,
     get_video_qualities,
+    validate_video_url,
 )
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -35,12 +36,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    url = update.message.text.strip()
+    text = (update.message.text or "").strip() if update.message else ""
 
-    if "youtube.com/" not in url and "youtu.be/" not in url:
+    if not text:
         await update.message.reply_text(
-            "لطفاً یک لینک معتبر YouTube بفرست. 🔗"
+            "لطفاً یک لینک معتبر و غیرخالی از YouTube بفرستید. 🔗"
         )
+        return
+
+    try:
+        url = validate_video_url(text)
+    except ValueError as exc:
+        msg = str(exc)
+        if "starting with https://" in msg:
+            error_msg = "لینک نامعتبر است. لطفاً لینکی وارد کنید که با https:// یا http:// شروع شود. 🔗"
+        elif "non-empty" in msg:
+            error_msg = "لطفاً یک لینک معتبر و غیرخالی از YouTube بفرستید. 🔗"
+        else:
+            error_msg = (
+                "لینک ارسالی نامعتبر یا پشتیبانی‌نشده است. ❌\n"
+                "لطفاً لینک مستقیم یک ویدیوی تکی YouTube (مانند watch، shorts یا live) را ارسال کنید. "
+                "دانلود پلی‌لیست یا کانال امکان‌پذیر نیست. 🔗"
+            )
+        await update.message.reply_text(error_msg)
         return
 
     context.user_data["youtube_url"] = url
@@ -68,6 +86,15 @@ async def choose_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not url:
         await query.edit_message_text(
             "لینک YouTube پیدا نشد. لطفاً دوباره لینک رو بفرست."
+        )
+        return
+
+    try:
+        url = validate_video_url(url)
+    except ValueError:
+        context.user_data.pop("youtube_url", None)
+        await query.edit_message_text(
+            "❌ لینک ذخیره‌شده نامعتبر است. لطفاً دوباره یک لینک معتبر YouTube بفرستید."
         )
         return
 
@@ -158,6 +185,15 @@ async def choose_quality(
         )
         return
 
+    try:
+        url = validate_video_url(url)
+    except ValueError:
+        context.user_data.pop("youtube_url", None)
+        await query.edit_message_text(
+            "❌ لینک ذخیره‌شده نامعتبر است. لطفاً دوباره یک لینک معتبر YouTube بفرستید."
+        )
+        return
+
     height = int(query.data.split(":", 1)[1])
     context.user_data["video_height"] = height
 
@@ -215,6 +251,15 @@ async def choose_audio_format(
     if not url:
         await query.edit_message_text(
             "❌ لینک YouTube پیدا نشد. لطفاً دوباره لینک رو بفرست."
+        )
+        return
+
+    try:
+        url = validate_video_url(url)
+    except ValueError:
+        context.user_data.pop("youtube_url", None)
+        await query.edit_message_text(
+            "❌ لینک ذخیره‌شده نامعتبر است. لطفاً دوباره یک لینک معتبر YouTube بفرستید."
         )
         return
 

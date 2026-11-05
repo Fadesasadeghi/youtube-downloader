@@ -1,11 +1,39 @@
+import re
 import shutil
 from math import isfinite
 from os import PathLike, fspath
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 from yt_dlp.postprocessor import PostProcessor
 from yt_dlp.utils import YoutubeDLError
+
+
+def validate_video_url(url: str) -> str:
+    """Validate an individual YouTube video URL before fetching metadata."""
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("Please provide a non-empty video URL.")
+    url = url.strip()
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Please enter a YouTube URL starting with https://.")
+
+    host = parsed.hostname or ""
+    parts = parsed.path.strip("/").split("/")
+    video_id = ""
+    if host in {"youtu.be", "www.youtu.be"} and len(parts) == 1:
+        video_id = parts[0]
+    elif host in {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}:
+        if parsed.path == "/watch":
+            video_id = parse_qs(parsed.query).get("v", [""])[0]
+        elif len(parts) == 2 and parts[0] in {"shorts", "live", "embed"}:
+            video_id = parts[1]
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+        raise ValueError("Please enter a valid individual YouTube video URL.")
+    return url
 
 
 def _detect_node_runtime() -> str | None:
