@@ -23,6 +23,7 @@ load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 PROXY_URL = os.getenv("TELEGRAM_PROXY_URL")
+DOWNLOADS_DIR = Path(__file__).resolve().parent / "downloads"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -171,7 +172,7 @@ async def choose_quality(
             download_video,
             url,
             height,
-            "downloads",
+            DOWNLOADS_DIR,
         )
 
         filepath = result["filepath"]
@@ -229,7 +230,7 @@ async def choose_audio_format(
         result = await asyncio.to_thread(
             download_audio,
             url,
-            "downloads",
+            DOWNLOADS_DIR,
             audio_format,
         )
 

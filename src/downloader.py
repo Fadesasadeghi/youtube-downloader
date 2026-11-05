@@ -1,3 +1,4 @@
+import shutil
 from math import isfinite
 from os import PathLike, fspath
 from pathlib import Path
@@ -5,6 +6,16 @@ from pathlib import Path
 import yt_dlp
 from yt_dlp.postprocessor import PostProcessor
 from yt_dlp.utils import YoutubeDLError
+
+
+def _detect_node_runtime() -> str | None:
+    """Detect Node.js executable path portably, returning None if unavailable."""
+    if Path("/usr/bin/node").is_file():
+        return "/usr/bin/node"
+    node_on_path = shutil.which("node")
+    if node_on_path:
+        return node_on_path
+    return None
 
 
 class _CompletedDownload(PostProcessor):
@@ -30,7 +41,7 @@ def download_video(url: str, height: int, output_dir: str | PathLike) -> dict:
     codecs and MKV remain available without transcoding. Unknown-height formats
     are excluded so the cap cannot be silently exceeded. Raises ValueError for
     invalid inputs and RuntimeError for extraction, download, or filesystem
-    failures. Requires FFmpeg on PATH and Node at /usr/bin/node.
+    failures. Requires FFmpeg on PATH and Node (at /usr/bin/node on Linux/WSL or on PATH).
     """
     if not isinstance(url, str) or not url.strip():
         raise ValueError("Please provide a non-empty video URL.")
@@ -47,11 +58,11 @@ def download_video(url: str, height: int, output_dir: str | PathLike) -> dict:
         raise ValueError("Please provide a valid output directory path.") from exc
 
     completed = _CompletedDownload()
+    node_runtime = _detect_node_runtime()
     options = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "js_runtimes": {"node": {"path": "/usr/bin/node"}},
         "format": f"bv[height<={height}]+ba/b[height<={height}]",
         "format_sort": ["res", "vcodec:h264", "acodec:aac"],
         "merge_output_format": "mp4/mkv",
@@ -61,6 +72,8 @@ def download_video(url: str, height: int, output_dir: str | PathLike) -> dict:
         "windowsfilenames": True,
         "overwrites": False,
     }
+    if node_runtime:
+        options["js_runtimes"] = {"node": {"path": node_runtime}}
     try:
         destination.mkdir(parents=True, exist_ok=True)
         with yt_dlp.YoutubeDL(options) as ydl:
@@ -100,10 +113,10 @@ def download_audio(
 
     Creates output_dir and reuses completed outputs. Returns an absolute,
     existing filepath plus id, title, ext, and audio_format. Requires FFmpeg
-    on PATH and Node at /usr/bin/node. M4A prefers native M4A, then AAC
-    (remuxed without re-encoding), then converts the best available audio.
-    Invalid inputs raise ValueError; download/filesystem failures raise
-    RuntimeError. Error messages omit raw extractor text, which can contain
+    on PATH and Node (at /usr/bin/node on Linux/WSL or on PATH). M4A prefers
+    native M4A, then AAC (remuxed without re-encoding), then converts the best
+    available audio. Invalid inputs raise ValueError; download/filesystem failures
+    raise RuntimeError. Error messages omit raw extractor text, which can contain
     credentials or signed URLs.
     """
     if not isinstance(url, str) or not url.strip():
@@ -124,11 +137,11 @@ def download_audio(
         raise RuntimeError("Unable to resolve the audio output directory.") from None
 
     completed = _CompletedDownload()
+    node_runtime = _detect_node_runtime()
     options = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "js_runtimes": {"node": {"path": "/usr/bin/node"}},
         "format": "bestaudio" if audio_format == "mp3" else
                   "bestaudio[ext=m4a]/bestaudio[acodec^=aac]/bestaudio[acodec^=mp4a]/bestaudio",
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": audio_format}],
@@ -139,6 +152,8 @@ def download_audio(
         "windowsfilenames": True,
         "overwrites": False,
     }
+    if node_runtime:
+        options["js_runtimes"] = {"node": {"path": node_runtime}}
     stage = "create the audio output directory"
     try:
         destination.mkdir(parents=True, exist_ok=True)
