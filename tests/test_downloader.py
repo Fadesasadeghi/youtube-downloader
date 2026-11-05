@@ -6,7 +6,12 @@ from unittest.mock import patch
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import YoutubeDLError
 
-from src.downloader import download_video, get_video_info, get_video_qualities
+from src.downloader import (
+    _detect_node_runtime,
+    download_video,
+    get_video_info,
+    get_video_qualities,
+)
 
 
 def video(format_id, height=720, **overrides):
@@ -134,7 +139,11 @@ class VideoDownloadTests(unittest.TestCase):
         self.assertEqual(options["format"], "bv[height<=720]+ba/b[height<=720]")
         self.assertEqual(options["merge_output_format"], "mp4/mkv")
         self.assertEqual(options["format_sort"], ["res", "vcodec:h264", "acodec:aac"])
-        self.assertEqual(options["js_runtimes"], {"node": {"path": "/usr/bin/node"}})
+        node_runtime = _detect_node_runtime()
+        if node_runtime:
+            self.assertEqual(options["js_runtimes"], {"node": {"path": node_runtime}})
+        else:
+            self.assertNotIn("js_runtimes", options)
         self.assertTrue(options["noplaylist"])
         self.assertFalse(options["overwrites"])
         self.assertTrue(options["restrictfilenames"])
@@ -238,6 +247,34 @@ class VideoDownloadTests(unittest.TestCase):
                         self.assertLessEqual(item["height"], 720)
                         if expected == "vp9+opus":
                             self.assertEqual(item["ext"], "mkv")
+
+    def test_download_options_omits_js_runtimes_when_node_unavailable(self):
+        with patch("src.downloader._detect_node_runtime", return_value=None):
+            download_video("test", 720, self.directory)
+            options = self.factory.call_args.args[0]
+            self.assertNotIn("js_runtimes", options)
+
+    def test_download_options_includes_js_runtimes_when_node_available(self):
+        with patch("src.downloader._detect_node_runtime", return_value="/custom/node"):
+            download_video("test", 720, self.directory)
+            options = self.factory.call_args.args[0]
+            self.assertEqual(options["js_runtimes"], {"node": {"path": "/custom/node"}})
+
+
+class NodeRuntimeDetectionTests(unittest.TestCase):
+    def test_preserves_linux_wsl_usr_bin_node(self):
+        with patch("src.downloader.Path.is_file", return_value=True):
+            self.assertEqual(_detect_node_runtime(), "/usr/bin/node")
+
+    def test_detects_node_from_system_path_when_usr_bin_node_missing(self):
+        with patch("src.downloader.Path.is_file", return_value=False):
+            with patch("src.downloader.shutil.which", return_value="/custom/path/node"):
+                self.assertEqual(_detect_node_runtime(), "/custom/path/node")
+
+    def test_returns_none_when_node_unavailable(self):
+        with patch("src.downloader.Path.is_file", return_value=False):
+            with patch("src.downloader.shutil.which", return_value=None):
+                self.assertIsNone(_detect_node_runtime())
 
 
 if __name__ == "__main__":

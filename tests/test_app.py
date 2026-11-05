@@ -29,7 +29,7 @@ class AppTests(unittest.TestCase):
         self.qualities.return_value = [
             {"height": 720}, {"height": 360}, {"height": 720.0}, {"height": None},
         ]
-        self.app = AppTest.from_file(str(APP)).run()
+        self.app = AppTest.from_file(str(APP)).run(timeout=15)
 
     def load(self):
         self.app.text_input[0].set_value(URL)

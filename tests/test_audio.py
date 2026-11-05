@@ -8,7 +8,7 @@ from yt_dlp import YoutubeDL
 from yt_dlp.postprocessor.ffmpeg import FFmpegExtractAudioPP
 from yt_dlp.utils import DownloadError, PostProcessingError
 
-from src.downloader import download_audio
+from src.downloader import _detect_node_runtime, download_audio
 
 
 class AudioDownloadTests(unittest.TestCase):
@@ -46,7 +46,11 @@ class AudioDownloadTests(unittest.TestCase):
         for option in ('quiet', 'no_warnings', 'noplaylist', 'restrictfilenames', 'windowsfilenames'):
             self.assertTrue(options[option])
         self.assertFalse(options['overwrites'])
-        self.assertEqual(options['js_runtimes'], {'node': {'path': '/usr/bin/node'}})
+        node_runtime = _detect_node_runtime()
+        if node_runtime:
+            self.assertEqual(options['js_runtimes'], {'node': {'path': node_runtime}})
+        else:
+            self.assertNotIn('js_runtimes', options)
         self.assertEqual(options['outtmpl'], '%(title).150B [%(id)s] [audio-mp3].%(ext)s')
         self.assertEqual(options['paths'], {'home': str(self.directory)})
         self.ydl.extract_info.assert_called_once_with('test', download=False, process=False)
@@ -67,6 +71,16 @@ class AudioDownloadTests(unittest.TestCase):
         self.assertEqual(result['audio_format'], 'm4a')
         self.assertEqual(result['ext'], 'm4a')
         self.assertEqual(self.options('MP3')[1]['audio_format'], 'mp3')
+
+    def test_audio_options_omits_js_runtimes_when_node_unavailable(self):
+        with patch('src.downloader._detect_node_runtime', return_value=None):
+            options, _ = self.options('mp3')
+            self.assertNotIn('js_runtimes', options)
+
+    def test_audio_options_includes_js_runtimes_when_node_available(self):
+        with patch('src.downloader._detect_node_runtime', return_value='/custom/node'):
+            options, _ = self.options('mp3')
+            self.assertEqual(options['js_runtimes'], {'node': {'path': '/custom/node'}})
 
     def test_creates_nested_directory(self):
         destination = self.directory / 'new' / 'nested'
