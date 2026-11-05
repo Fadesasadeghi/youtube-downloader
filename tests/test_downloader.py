@@ -11,6 +11,7 @@ from src.downloader import (
     download_video,
     get_video_info,
     get_video_qualities,
+    validate_video_url,
 )
 
 
@@ -275,6 +276,47 @@ class NodeRuntimeDetectionTests(unittest.TestCase):
         with patch("src.downloader.Path.is_file", return_value=False):
             with patch("src.downloader.shutil.which", return_value=None):
                 self.assertIsNone(_detect_node_runtime())
+
+
+class ValidateVideoUrlTests(unittest.TestCase):
+    def test_valid_youtube_urls(self):
+        valid_urls = [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "http://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtu.be/dQw4w9WgXcQ",
+            "https://www.youtu.be/dQw4w9WgXcQ",
+            "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+            "https://www.youtube.com/live/dQw4w9WgXcQ",
+            "https://www.youtube.com/embed/dQw4w9WgXcQ",
+            "  https://youtu.be/dQw4w9WgXcQ  ",
+        ]
+        for url in valid_urls:
+            with self.subTest(url=url):
+                self.assertEqual(validate_video_url(url), url.strip())
+
+    def test_invalid_urls_raise_value_error(self):
+        invalid_cases = [
+            ("", "Please provide a non-empty video URL."),
+            ("   ", "Please provide a non-empty video URL."),
+            (None, "Please provide a non-empty video URL."),
+            (12345, "Please provide a non-empty video URL."),
+            ("ftp://youtube.com/watch?v=dQw4w9WgXcQ", "starting with https://"),
+            ("www.youtube.com/watch?v=dQw4w9WgXcQ", "starting with https://"),
+            ("https://vimeo.com/12345678901", "valid individual YouTube video URL"),
+            ("https://www.youtube.com/playlist?list=PL1234567890", "valid individual YouTube video URL"),
+            ("https://www.youtube.com/@username", "valid individual YouTube video URL"),
+            ("https://youtu.be/too_short", "valid individual YouTube video URL"),
+            ("https://youtu.be/toolongvideoid123", "valid individual YouTube video URL"),
+            ("https://www.youtube.com/watch?v=invalid!id!", "valid individual YouTube video URL"),
+        ]
+        for url, expected_error in invalid_cases:
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError) as ctx:
+                    validate_video_url(url)
+                self.assertIn(expected_error, str(ctx.exception))
 
 
 if __name__ == "__main__":
